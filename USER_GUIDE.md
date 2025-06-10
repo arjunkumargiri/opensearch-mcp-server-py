@@ -26,6 +26,9 @@ For Claude Desktop, configure `claude_desktop_config.json` from Settings > Devel
       "env": {
         // Optional
         "OPENSEARCH_URL": "<your_opensearch_domain_url>",
+        
+        // For OpenSearch Serverless
+        "AWS_OPENSEARCH_SERVERLESS": "true",  // Set to "true" for OpenSearch Serverless
 
         // For Basic Authentication
         "OPENSEARCH_USERNAME": "<your_opensearch_domain_username>",
@@ -67,6 +70,9 @@ pip install opensearch-mcp-server-py
             "env": {
                 // Optional
                 "OPENSEARCH_URL": "<your_opensearch_domain_url>",
+                
+                // For OpenSearch Serverless
+                "AWS_OPENSEARCH_SERVERLESS": "true",  // Set to "true" for OpenSearch Serverless
 
                 // For Basic Authentication
                 "OPENSEARCH_USERNAME": "<your_opensearch_domain_username>",
@@ -98,6 +104,16 @@ export OPENSEARCH_PASSWORD="<your_opensearch_domain_password>"
 - **IAM Role Authentication**
 ```
 export OPENSEARCH_URL="<your_opensearch_domain_url>"
+export AWS_REGION="<your_aws_region>"
+export AWS_ACCESS_KEY_ID="<your_aws_access_key>"
+export AWS_SECRET_ACCESS_KEY="<your_aws_secret_access_key>"
+export AWS_SESSION_TOKEN="<your_aws_session_token>"
+```
+
+- **OpenSearch Serverless**
+```
+export OPENSEARCH_URL="<your_opensearch_serverless_endpoint>"
+export AWS_OPENSEARCH_SERVERLESS=true
 export AWS_REGION="<your_aws_region>"
 export AWS_ACCESS_KEY_ID="<your_aws_access_key>"
 export AWS_SECRET_ACCESS_KEY="<your_aws_secret_access_key>"

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 OPENSEARCH_SERVICE = "es"
+OPENSEARCH_SERVERLESS_SERVICE = "aoss"
 
 # This file should expose the OpenSearch py client
 def initialize_client(opensearch_url: str) -> OpenSearch:
@@ -24,6 +25,8 @@ def initialize_client(opensearch_url: str) -> OpenSearch:
     The function attempts to authenticate in the following order:
     1. Basic authentication using OPENSEARCH_USERNAME and OPENSEARCH_PASSWORD
     2. AWS IAM authentication using boto3 credentials
+       - Uses 'aoss' service name if OPENSEARCH_SERVERLESS=true
+       - Uses 'es' service name otherwise
 
     Args:
         opensearch_url (str): The URL of the OpenSearch cluster. Must be a non-empty string.
@@ -40,6 +43,13 @@ def initialize_client(opensearch_url: str) -> OpenSearch:
 
     opensearch_username = os.getenv("OPENSEARCH_USERNAME", "")
     opensearch_password = os.getenv("OPENSEARCH_PASSWORD", "")
+    
+    # Check if using OpenSearch Serverless
+    is_serverless = os.getenv("AWS_OPENSEARCH_SERVERLESS", "").lower() == "true"
+    service_name = OPENSEARCH_SERVERLESS_SERVICE if is_serverless else OPENSEARCH_SERVICE
+    
+    if is_serverless:
+        logger.info("Using OpenSearch Serverless with service name: aoss")
 
     # Parse the OpenSearch domain URL
     parsed_url = urlparse(opensearch_url)
@@ -67,7 +77,7 @@ def initialize_client(opensearch_url: str) -> OpenSearch:
         if credentials:
             aws_auth = AWS4Auth(
                 refreshable_credentials=credentials,
-                service=OPENSEARCH_SERVICE,
+                service=service_name,
                 region=aws_region,
             )
             client_kwargs['http_auth'] = aws_auth
