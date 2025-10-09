@@ -45,6 +45,7 @@ Core tools are grouped under the `core_tools` category and can be disabled at on
 - [CountTool](https://docs.opensearch.org/docs/latest/api-reference/search-apis/count/): Returns number of documents matching a query.
 - [ExplainTool](https://docs.opensearch.org/docs/latest/api-reference/search-apis/explain/): Returns information about why a specific document matches (or doesn't match) a query.
 - [MsearchTool](https://docs.opensearch.org/docs/latest/api-reference/search-apis/multi-search/): Allows to execute several search operations in one request.
+- **GenericOpenSearchApiTool**: A flexible tool that can call any OpenSearch API endpoint with custom paths, methods, query parameters, and request bodies. Reduces tool explosion by providing a single interface for all OpenSearch APIs.
 
 ### Additional Tools (Disabled by Default)
 The following tools are available but disabled by default. To enable them, see the [Tool Filter](USER_GUIDE.md#tool-filter) section in the User Guide.

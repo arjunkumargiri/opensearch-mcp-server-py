@@ -98,6 +98,7 @@ def process_tool_filter(
             'CountTool',
             'ExplainTool',
             'MsearchTool',
+            'GenericOpenSearchApiTool',
         ]
 
         # Build core tools list using display names

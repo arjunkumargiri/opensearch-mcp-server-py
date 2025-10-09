@@ -478,6 +478,9 @@ async def get_long_running_tasks_tool(args: GetLongRunningTasksArgs) -> list[dic
         return [{'type': 'text', 'text': f'Error getting long-running tasks information: {str(e)}'}]
 
 
+from .generic_api_tool import GenericOpenSearchApiArgs, generic_opensearch_api_tool
+
+
 # Registry of available OpenSearch tools with their metadata
 TOOL_REGISTRY = {
     'ListIndexTool': {
@@ -602,5 +605,14 @@ TOOL_REGISTRY = {
         'args_model': GetNodesArgs,
         'min_version': '1.0.0',
         'http_methods': 'GET',
+    },
+    'GenericOpenSearchApiTool': {
+        'display_name': 'GenericOpenSearchApiTool',
+        'description': 'A flexible tool for calling any OpenSearch API endpoint. Supports all HTTP methods with custom paths, query parameters, request bodies, and headers. Write operations (POST, PUT, DELETE, PATCH) require OPENSEARCH_SETTINGS_ALLOW_WRITE=true. Use this when you need to access OpenSearch APIs that don\'t have dedicated tools, or when you need more control over the request. Leverages your knowledge of OpenSearch API documentation to construct appropriate requests.',
+        'input_schema': GenericOpenSearchApiArgs.model_json_schema(),
+        'function': generic_opensearch_api_tool,
+        'args_model': GenericOpenSearchApiArgs,
+        'min_version': '1.0.0',
+        'http_methods': 'GET, POST, PUT, DELETE, HEAD, PATCH',
     },
 }
