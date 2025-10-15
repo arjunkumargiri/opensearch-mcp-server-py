@@ -3,6 +3,7 @@
 
 import json
 import logging
+import os
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
@@ -10,7 +11,6 @@ from .tool_params import baseToolArgs
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
 
 class GenericOpenSearchApiArgs(baseToolArgs):
     """Arguments for the generic OpenSearch API tool."""
@@ -28,7 +28,7 @@ class GenericOpenSearchApiArgs(baseToolArgs):
     )
     body: Optional[Any] = Field(
         default=None,
-        description='Request body for POST/PUT requests. Can be a JSON object, string, or None'
+        description='Request body for GET/POST/PUT requests. Can be a JSON object, string, or None'
     )
     headers: Optional[Dict[str, str]] = Field(
         default=None,
@@ -85,8 +85,8 @@ async def generic_opensearch_api_tool(args: GenericOpenSearchApiArgs) -> list[di
     The tool supports all HTTP methods and can handle query parameters, request bodies,
     and custom headers. It uses the same authentication and connection logic as other tools.
     
-    Write operations (POST, PUT, DELETE, PATCH) are only allowed when the 
-    OPENSEARCH_SETTINGS_ALLOW_WRITE environment variable is set to "true".
+    Write operations (POST, PUT, DELETE, PATCH) are only allowed when write 
+    operations are enabled via configuration.
     
     Args:
         args: GenericOpenSearchApiArgs containing the API request details
@@ -95,21 +95,18 @@ async def generic_opensearch_api_tool(args: GenericOpenSearchApiArgs) -> list[di
         list[dict]: API response in MCP format
     """
     try:
-        import os
-        from opensearch.client import initialize_client
-        
         # Validate method
         valid_methods = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'PATCH']
         method = args.method.upper()
         if method not in valid_methods:
             return [{'type': 'text', 'text': f'Error: Invalid HTTP method "{args.method}". Valid methods are: {", ".join(valid_methods)}'}]
         
-        # Check if write operations are allowed
-        allow_write = os.getenv('OPENSEARCH_SETTINGS_ALLOW_WRITE', 'true').lower() == 'true'
+        # Check if write operations are allowed using the global setting
+        allow_write = get_allow_write_setting()
         write_methods = ['POST', 'PUT', 'DELETE', 'PATCH']
         
         if method in write_methods and not allow_write:
-            return [{'type': 'text', 'text': f'Error: Write operations are disabled. Method "{method}" is not allowed. Set OPENSEARCH_SETTINGS_ALLOW_WRITE=true to enable write operations.'}]
+            return [{'type': 'text', 'text': f'Error: Write operations are disabled. Method "{method}" is not allowed. Enable write operations by setting OPENSEARCH_SETTINGS_ALLOW_WRITE=true or configuring allow_write: true in your config file.'}]
         
         # Validate path
         if not args.path.startswith('/'):

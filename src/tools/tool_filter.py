@@ -16,6 +16,10 @@ from .utils import (
 )
 from opensearch.helper import get_opensearch_version
 
+# Global variable to store the resolved allow_write setting
+# This is set during server initialization and used by individual tools
+_resolved_allow_write_setting = None
+
 
 def process_regex_patterns(regex_list, tool_names):
     """Process regex patterns and return matching tool names."""
@@ -25,6 +29,72 @@ def process_regex_patterns(regex_list, tool_names):
             if re.match(regex, tool_name, re.IGNORECASE):
                 matching_tools.append(tool_name)
     return matching_tools
+
+
+def set_allow_write_setting(allow_write: bool) -> None:
+    """Set the global allow_write setting.
+    
+    This function is called during server initialization to store the resolved
+    allow_write setting for use by individual tools.
+    
+    Args:
+        allow_write: The resolved allow_write setting
+    """
+    global _resolved_allow_write_setting
+    _resolved_allow_write_setting = allow_write
+    logging.debug(f"Set global allow_write setting to: {allow_write}")
+
+
+def get_allow_write_setting() -> bool:
+    """Get the allow_write setting.
+    
+    This function returns the allow_write setting that was resolved during
+    server initialization. If not set, falls back to environment variable.
+    
+    Returns:
+        bool: True if write operations are allowed, False otherwise
+    """
+    global _resolved_allow_write_setting
+    
+    # If the setting was resolved during server initialization, use it
+    if _resolved_allow_write_setting is not None:
+        return _resolved_allow_write_setting
+    
+    # Fallback to environment variable if not set during initialization
+    return os.getenv('OPENSEARCH_SETTINGS_ALLOW_WRITE', 'true').lower() == 'true'
+
+
+def _resolve_allow_write_setting(config_file_path: str = None) -> bool:
+    """Resolve the allow_write setting from environment variable or config file.
+    
+    This is an internal function used during server initialization to determine
+    the final allow_write setting.
+    
+    Args:
+        config_file_path: Optional path to config file
+    
+    Returns:
+        bool: True if write operations are allowed, False otherwise
+    """
+    # Start with environment variable (default is true)
+    allow_write = os.getenv('OPENSEARCH_SETTINGS_ALLOW_WRITE', 'true').lower() == 'true'
+    
+    # Check config file if provided
+    if config_file_path and os.path.exists(config_file_path):
+        try:
+            config = load_yaml_config(config_file_path)
+            if config:
+                # Use the same logic as process_tool_filter
+                tool_filters = config.get('tool_filters', {})
+                settings = tool_filters.get('settings', {})
+                if 'allow_write' in settings:
+                    # Config file setting overrides environment variable
+                    allow_write = settings.get('allow_write', True)
+                    logging.debug(f"Using allow_write setting from config file: {config_file_path}")
+        except Exception as e:
+            logging.debug(f"Could not load config file {config_file_path}: {e}")
+    
+    return allow_write
 
 
 def apply_write_filter(registry):
@@ -234,6 +304,11 @@ def get_tools(tool_registry: dict, mode: str = 'single', config_file_path: str =
     Returns:
         dict: Dictionary of enabled tools with their configurations
     """
+    # Resolve and set the global allow_write setting for use by individual tools
+    # This needs to be done in both single and multi mode
+    resolved_allow_write = _resolve_allow_write_setting(config_file_path)
+    set_allow_write_setting(resolved_allow_write)
+
     # In multi mode, return all tools without any filtering
     if mode == 'multi':
         return tool_registry
