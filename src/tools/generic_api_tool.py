@@ -102,6 +102,8 @@ async def generic_opensearch_api_tool(args: GenericOpenSearchApiArgs) -> list[di
             return [{'type': 'text', 'text': f'Error: Invalid HTTP method "{args.method}". Valid methods are: {", ".join(valid_methods)}'}]
         
         # Check if write operations are allowed using the global setting
+        # Import here to avoid circular import (tool_filter -> tools -> generic_api_tool -> tool_filter)
+        from .tool_filter import get_allow_write_setting
         allow_write = get_allow_write_setting()
         write_methods = ['POST', 'PUT', 'DELETE', 'PATCH']
         
@@ -113,6 +115,7 @@ async def generic_opensearch_api_tool(args: GenericOpenSearchApiArgs) -> list[di
             return [{'type': 'text', 'text': 'Error: API path must start with "/"'}]
         
         # Initialize OpenSearch client
+        from opensearch.client import initialize_client
         client = initialize_client(args)
         
         # Build the request URL
