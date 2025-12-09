@@ -582,7 +582,7 @@ tools:
   GetShardsTool:
     description: "Retrieve detailed information about OpenSearch shards"
   SearchIndexTool:
-     max_size_limit: "20"
+     max_size_limit: 20
 ```
 
 Use the configuration file when starting the server:
