@@ -118,7 +118,9 @@ class TestOpenSearchHelper:
         mock_get_client.assert_called_once_with(
             SearchIndexArgs(index='test-index', query=test_query, opensearch_cluster_name='')
         )
-        mock_client.search.assert_called_once_with(index='test-index', body=test_query)
+        # The search_index function adds size to the query body (default 10, max 100)
+        expected_body = {'query': {'match_all': {}}, 'size': 10}
+        mock_client.search.assert_called_once_with(index='test-index', body=expected_body)
 
     @pytest.mark.asyncio
     @patch('opensearch.client.get_opensearch_client')

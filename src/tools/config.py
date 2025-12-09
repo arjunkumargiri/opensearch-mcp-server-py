@@ -12,6 +12,7 @@ from tools.tools import TOOL_REGISTRY as default_tool_registry
 DISPLAY_NAME_STRING = 'display_name'
 DESCRIPTION_STRING = 'description'
 ARGS_STRING = 'args'
+MAX_SIZE_LIMIT = 'max_size_limit'
 
 # Regex pattern for tool display name validation
 DISPLAY_NAME_PATTERN = r'^[a-zA-Z0-9_-]+$'
@@ -54,7 +55,7 @@ def _load_config_from_file(config_from_file: Dict[str, Any]) -> Dict[str, Dict[s
                 if parsed_args := _parse_args_map(tool_name, value):
                     out.setdefault(ARGS_STRING, {}).update(parsed_args)
                 continue
-            if key in (DISPLAY_NAME_STRING, DESCRIPTION_STRING):
+            if key in (DISPLAY_NAME_STRING, DESCRIPTION_STRING, MAX_SIZE_LIMIT):
                 out[key] = value
                 continue
             # Disallow non-standard top-level fields in YAML config
@@ -110,7 +111,7 @@ def parse_cli_to_nested_config(cli_tool_overrides: Dict[str, str]) -> Dict[str, 
             continue
         # Only allow top-level fields: display_name, description, args
         top_field = nested_keys[2]
-        if top_field not in (DISPLAY_NAME_STRING, DESCRIPTION_STRING, ARGS_STRING):
+        if top_field not in (DISPLAY_NAME_STRING, DESCRIPTION_STRING, ARGS_STRING, MAX_SIZE_LIMIT):
             continue
         nested = _put_nested_dict(nested, nested_keys[1:], raw_value)
 

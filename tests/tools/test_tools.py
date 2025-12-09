@@ -306,7 +306,10 @@ class TestTools:
         assert result[0]['type'] == 'text'
         assert 'Search results from test-index' in result[0]['text']
         assert json.loads(result[0]['text'].split('\n', 1)[1]) == mock_results
-        self.mock_client.search.assert_called_once_with(index='test-index', body={'match_all': {}})
+        # The search_index function adds size to the query body (default 10, max 100)
+        self.mock_client.search.assert_called_once_with(
+            index='test-index', body={'match_all': {}, 'size': 10}
+        )
 
     @pytest.mark.asyncio
     async def test_search_index_tool_error(self):
@@ -322,7 +325,10 @@ class TestTools:
         assert len(result) == 1
         assert result[0]['type'] == 'text'
         assert 'Error searching index: Test error' in result[0]['text']
-        self.mock_client.search.assert_called_once_with(index='test-index', body={'match_all': {}})
+        # The search_index function adds size to the query body (default 10, max 100)
+        self.mock_client.search.assert_called_once_with(
+            index='test-index', body={'match_all': {}, 'size': 10}
+        )
 
     @pytest.mark.asyncio
     async def test_get_shards_tool(self):

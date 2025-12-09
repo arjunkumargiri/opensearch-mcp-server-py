@@ -53,9 +53,18 @@ async def get_index_mapping(args: GetIndexMappingArgs) -> json:
 
 async def search_index(args: SearchIndexArgs) -> json:
     from .client import get_opensearch_client
+    from tools.tools import TOOL_REGISTRY
 
     async with get_opensearch_client(args) as client:
         query = normalize_scientific_notation(args.query)
+        
+        # Limit size to maximum of 100
+        tool_info = TOOL_REGISTRY.get('SearchIndexTool', {})
+        max_size_limit = tool_info.get('max_size_limit', 100)  # Default to 100 if not configured
+
+        effective_size = min(args.size, max_size_limit) if args.size else 10
+        query['size'] = effective_size
+        
         response = await client.search(index=args.index, body=query)
         return response
 

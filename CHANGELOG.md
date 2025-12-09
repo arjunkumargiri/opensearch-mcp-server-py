@@ -7,6 +7,7 @@ Inspired from [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ### Added
 - Convert JSON to CSV for search index tool result ([#140](https://github.com/opensearch-project/opensearch-mcp-server-py/pull/140))
 - Add Normalize scientific-notation floats in a request body for search index tool ([#142](https://github.com/opensearch-project/opensearch-mcp-server-py/pull/142))
+- Limit response size to maximum 100 ([#145](https://github.com/opensearch-project/opensearch-mcp-server-py/pull/145))
 
 ### Fixed
 - Fix AWS auth issues for cat based tools, pin OpenSearchPy to 2.18.0 ([#135](https://github.com/opensearch-project/opensearch-mcp-server-py/pull/135))
