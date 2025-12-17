@@ -22,6 +22,7 @@ class ClusterInfo(BaseModel):
     opensearch_no_auth: Optional[bool] = None
     ssl_verify: Optional[bool] = None
     opensearch_header_auth: Optional[bool] = None
+    max_response_size: Optional[int] = None
 
 
 # Global dictionary to store cluster information
@@ -115,6 +116,7 @@ async def load_clusters_from_yaml(file_path: str) -> None:
                     opensearch_no_auth=cluster_config.get('opensearch_no_auth', None),
                     ssl_verify=cluster_config.get('ssl_verify', None),
                     opensearch_header_auth=cluster_config.get('opensearch_header_auth', None),
+                    max_response_size=cluster_config.get('max_response_size', None),
                 )
 
                 # Add cluster to registry without checking connection

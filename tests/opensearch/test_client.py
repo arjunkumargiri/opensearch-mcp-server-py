@@ -4,7 +4,7 @@
 import boto3
 import os
 import pytest
-from opensearch.client import initialize_client, ConfigurationError, AuthenticationError
+from opensearch.client import initialize_client, ConfigurationError, AuthenticationError, BufferedAsyncHttpConnection
 from opensearchpy import AsyncOpenSearch, AsyncHttpConnection, AWSV4SignerAsyncAuth
 from tools.tool_params import baseToolArgs
 from unittest.mock import Mock, patch
@@ -95,8 +95,9 @@ class TestOpenSearchClient:
             hosts=['https://test-opensearch-domain.com'],
             use_ssl=True,
             verify_certs=True,
-            connection_class=AsyncHttpConnection,
+            connection_class=BufferedAsyncHttpConnection,
             timeout=30,
+            max_response_size=10485760,  # 10MB default
             http_auth=('test-user', 'test-password'),
         )
 
@@ -137,7 +138,8 @@ class TestOpenSearchClient:
         assert call_kwargs['hosts'] == ['https://test-opensearch-domain.com']
         assert call_kwargs['use_ssl'] is True
         assert call_kwargs['verify_certs'] is True
-        assert call_kwargs['connection_class'] == AsyncHttpConnection
+        assert call_kwargs['connection_class'] == BufferedAsyncHttpConnection
+        assert call_kwargs['max_response_size'] == 10485760  # 10MB default
         assert isinstance(call_kwargs['http_auth'], AWSV4SignerAsyncAuth)
 
     @patch('opensearch.client.AsyncOpenSearch')
@@ -201,8 +203,9 @@ class TestOpenSearchClient:
             hosts=['https://test-opensearch-domain.com'],
             use_ssl=True,
             verify_certs=True,
-            connection_class=AsyncHttpConnection,
+            connection_class=BufferedAsyncHttpConnection,
             timeout=30,
+            max_response_size=10485760,  # 10MB default
         )
 
     @patch('opensearch.client._initialize_client_single_mode')
@@ -270,7 +273,8 @@ class TestOpenSearchClient:
         assert call_kwargs['hosts'] == ['http://localhost:9200']
         assert call_kwargs['use_ssl'] is False  # http:// URL
         assert call_kwargs['verify_certs'] is True
-        assert call_kwargs['connection_class'] == AsyncHttpConnection
+        assert call_kwargs['connection_class'] == BufferedAsyncHttpConnection
+        assert call_kwargs['max_response_size'] == 10485760  # 10MB default
         # Should not have http_auth when no-auth is True
         assert 'http_auth' not in call_kwargs
 

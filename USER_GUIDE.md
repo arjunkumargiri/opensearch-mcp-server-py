@@ -441,6 +441,12 @@ python -m mcp_server_opensearch --mode multi
 |----------|----------|---------|-------------|
 | `OPENSEARCH_SSL_VERIFY` | No | `"true"` | Control SSL certificate verification (`"true"` or `"false"`) |
 
+### Response Size Control Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENSEARCH_MAX_RESPONSE_SIZE` | No | `10485760` (10MB) | Maximum response size in bytes to prevent memory exhaustion from large responses |
+
 ### Tool Filtering Variables
 
 | Variable | Required | Default | Description |
@@ -472,6 +478,7 @@ When using multi-mode, each cluster in your YAML configuration file accepts the 
 | `opensearch_no_auth` | boolean | No | Set to `true` to connect without authentication |
 | `opensearch_header_auth` | boolean | No | Set to `true` to enable header-based authentication (headers take priority over config values) |
 | `timeout` | integer | No | Connection timeout in seconds for OpenSearch operations |
+| `max_response_size` | integer | No | Maximum response size in bytes (defaults to 10MB if not specified) |
 
 *Required for respective authentication method (basic auth, IAM role, or AWS credentials)
 
@@ -606,6 +613,63 @@ Configuration file settings have higher priority than runtime parameters. If bot
 - Only existing tools can be customized; new tools cannot be created
 - Changes take effect immediately when the server starts
 - Invalid tool names or properties will throw an error
+
+## Response Size Limiting
+
+The OpenSearch MCP server includes built-in response size limiting to prevent memory exhaustion when dealing with large responses from OpenSearch queries. This feature helps maintain server stability and prevents out-of-memory errors.
+
+### How It Works
+
+The server uses a buffered connection that monitors the size of incoming responses. If a response exceeds the configured limit, the connection stops reading additional data and raises a `ResponseSizeExceededError` with a helpful message.
+
+### Configuration
+
+#### Single Mode
+Set the `OPENSEARCH_MAX_RESPONSE_SIZE` environment variable:
+```bash
+export OPENSEARCH_MAX_RESPONSE_SIZE="20971520"  # 20MB limit
+```
+
+#### Multi Mode
+Configure `max_response_size` per cluster in your YAML configuration:
+```yaml
+clusters:
+  large-cluster:
+    opensearch_url: "https://large-cluster.example.com:9200"
+    max_response_size: 52428800  # 50MB limit for this cluster
+  
+  small-cluster:
+    opensearch_url: "https://small-cluster.example.com:9200"
+    max_response_size: 5242880   # 5MB limit for this cluster
+```
+
+### Configuration Priority
+
+The response size limit is determined in the following order (highest to lowest priority):
+
+1. **Cluster-specific configuration** (multi mode only): `max_response_size` in YAML config
+2. **Environment variable**: `OPENSEARCH_MAX_RESPONSE_SIZE`
+3. **Default value**: 10MB (10,485,760 bytes)
+
+### Default Behavior
+
+- **Default limit**: 10MB (10,485,760 bytes)
+- **Invalid values**: If an invalid value is provided (non-numeric, negative, or zero), the server falls back to the default
+- **Error handling**: When the limit is exceeded, a clear error message is returned with suggestions for resolution
+
+### Best Practices
+
+- **Set appropriate limits**: Configure limits based on your expected data sizes and available memory
+- **Monitor usage**: Large responses may indicate inefficient queries that could be optimized
+- **Adjust as needed**: Increase limits for legitimate large data operations, decrease for memory-constrained environments
+- **Query optimization**: Consider using pagination, filtering, or field selection to reduce response sizes
+
+### Example Error Message
+
+When the response size limit is exceeded, you'll see an error like:
+```
+Response size exceeded limit of 10485760 bytes. Stopped reading at 15728640 bytes to prevent memory exhaustion. Consider increasing max_response_size or refining your query to return less data.
+```
 
 ## LangChain Integration
 
