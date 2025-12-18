@@ -14,6 +14,8 @@ import ssl
 
 from opensearch.client import (
     _create_opensearch_client,
+)
+from opensearch.connection import (
     DEFAULT_MAX_RESPONSE_SIZE,
 )
 from opensearch.connection import (
@@ -27,7 +29,7 @@ class TestBufferedAsyncHttpConnection:
     """Test the BufferedAsyncHttpConnection class."""
 
     def test_init_default_max_response_size(self):
-        """Test initialization with default max_response_size."""
+        """Test initialization with default max_response_size (None - no limit)."""
         connection = BufferedAsyncHttpConnection(
             host='localhost',
             port=9200,
@@ -35,6 +37,7 @@ class TestBufferedAsyncHttpConnection:
         )
         
         assert connection.max_response_size == DEFAULT_MAX_RESPONSE_SIZE
+        assert connection.max_response_size is None  # No limit by default
         assert connection.host == 'http://localhost:9200'
 
     def test_init_custom_max_response_size(self):

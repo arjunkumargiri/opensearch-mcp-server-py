@@ -32,11 +32,10 @@ OPENSEARCH_SERVICE = 'es'
 OPENSEARCH_SERVERLESS_SERVICE = 'aoss'
 DEFAULT_TIMEOUT = 30
 DEFAULT_SSL_VERIFY = True
-DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB default limit
 
 
 # Import custom connection classes and exceptions
-from .connection import BufferedAsyncHttpConnection, ResponseSizeExceededError, OpenSearchClientError
+from .connection import BufferedAsyncHttpConnection, ResponseSizeExceededError, OpenSearchClientError, DEFAULT_MAX_RESPONSE_SIZE
 
 
 class AuthenticationError(OpenSearchClientError):
@@ -388,7 +387,7 @@ def _create_opensearch_client(
         aws_access_key_id: AWS access key ID from headers (optional)
         aws_secret_access_key: AWS secret access key from headers (optional)
         aws_session_token: AWS session token from headers (optional)
-        max_response_size: Maximum response size in bytes (None uses default 10MB)
+        max_response_size: Maximum response size in bytes (None means no limit)
 
     Returns:
         OpenSearch: An initialized OpenSearch client instance
@@ -437,7 +436,10 @@ def _create_opensearch_client(
         'max_response_size': response_size_limit,
     }
     
-    logger.info(f'Configuring OpenSearch client with max_response_size={response_size_limit} bytes')
+    if response_size_limit is not None:
+        logger.info(f'Configuring OpenSearch client with max_response_size={response_size_limit} bytes')
+    else:
+        logger.info('Configuring OpenSearch client with no response size limit')
 
     # Create boto3 session
     try:

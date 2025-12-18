@@ -15,7 +15,7 @@ from opensearchpy import AsyncHttpConnection
 logger = logging.getLogger(__name__)
 
 # Constants
-DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB default limit
+DEFAULT_MAX_RESPONSE_SIZE = None  # No limit by default - only enforce when explicitly set
 
 
 # Base exception class (to avoid circular imports)
@@ -44,12 +44,15 @@ class BufferedAsyncHttpConnection(AsyncHttpConnection):
         Initialize buffered connection with response size limit.
         
         Args:
-            max_response_size: Maximum allowed response size in bytes (default: 10MB)
+            max_response_size: Maximum allowed response size in bytes (default: None - no limit)
             *args, **kwargs: Arguments passed to parent AsyncHttpConnection
         """
         super().__init__(*args, **kwargs)
         self.max_response_size = max_response_size
-        logger.debug(f'Initialized BufferedAsyncHttpConnection with max_response_size={max_response_size} bytes')
+        if max_response_size is not None:
+            logger.debug(f'Initialized BufferedAsyncHttpConnection with max_response_size={max_response_size} bytes')
+        else:
+            logger.debug('Initialized BufferedAsyncHttpConnection with no response size limit')
 
     async def perform_request(self, method, url, params=None, body=None, timeout=None, ignore=(), headers=None):
         """
@@ -135,13 +138,13 @@ class BufferedAsyncHttpConnection(AsyncHttpConnection):
                 fingerprint=self.ssl_assert_fingerprint,
             ) as response:
                 
-                # Stream the response with size checking
+                # Stream the response with optional size checking
                 chunks = []
                 total_size = 0
                 
                 async for chunk in response.content.iter_chunked(8192):
-                    # Check if adding this chunk would exceed the limit
-                    if total_size + len(chunk) > self.max_response_size:
+                    # Only check size limit if max_response_size is set
+                    if self.max_response_size is not None and total_size + len(chunk) > self.max_response_size:
                         duration = self.loop.time() - start
                         self.log_request_fail(
                             method,
@@ -196,7 +199,10 @@ class BufferedAsyncHttpConnection(AsyncHttpConnection):
                 method, str(url), url_path, orig_body, response.status, raw_data, duration
             )
 
-            logger.debug(f'Response size check passed: {total_size} bytes (limit: {self.max_response_size})')
+            if self.max_response_size is not None:
+                logger.debug(f'Response size check passed: {total_size} bytes (limit: {self.max_response_size})')
+            else:
+                logger.debug(f'Response received: {total_size} bytes (no size limit)')
             return response.status, response.headers, raw_data
 
         except ResponseSizeExceededError:
@@ -218,7 +224,7 @@ class BufferedAsyncHttpConnection(AsyncHttpConnection):
                 method, url, params, body, timeout, ignore, headers
             )
             
-            # Check response size after getting the data
+            # Check response size after getting the data (only if limit is set)
             if isinstance(response_data, str):
                 data_size = len(response_data.encode('utf-8'))
             elif isinstance(response_data, bytes):
@@ -227,7 +233,7 @@ class BufferedAsyncHttpConnection(AsyncHttpConnection):
                 # Unknown data type, convert to string and measure
                 data_size = len(str(response_data).encode('utf-8'))
             
-            if data_size > self.max_response_size:
+            if self.max_response_size is not None and data_size > self.max_response_size:
                 logger.error(
                     f'Response size exceeded limit: {data_size} > {self.max_response_size} bytes'
                 )
@@ -237,7 +243,10 @@ class BufferedAsyncHttpConnection(AsyncHttpConnection):
                     f"Consider increasing max_response_size or refining your query to return less data."
                 )
             
-            logger.debug(f'Response size check passed: {data_size} bytes (limit: {self.max_response_size})')
+            if self.max_response_size is not None:
+                logger.debug(f'Response size check passed: {data_size} bytes (limit: {self.max_response_size})')
+            else:
+                logger.debug(f'Response received: {data_size} bytes (no size limit)')
             return status, response_headers, response_data
 
         except ResponseSizeExceededError:

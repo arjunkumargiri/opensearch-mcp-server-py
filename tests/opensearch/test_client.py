@@ -97,7 +97,7 @@ class TestOpenSearchClient:
             verify_certs=True,
             connection_class=BufferedAsyncHttpConnection,
             timeout=30,
-            max_response_size=10485760,  # 10MB default
+            max_response_size=None,  # No limit by default
             http_auth=('test-user', 'test-password'),
         )
 
@@ -139,7 +139,7 @@ class TestOpenSearchClient:
         assert call_kwargs['use_ssl'] is True
         assert call_kwargs['verify_certs'] is True
         assert call_kwargs['connection_class'] == BufferedAsyncHttpConnection
-        assert call_kwargs['max_response_size'] == 10485760  # 10MB default
+        assert call_kwargs['max_response_size'] is None  # No limit by default
         assert isinstance(call_kwargs['http_auth'], AWSV4SignerAsyncAuth)
 
     @patch('opensearch.client.AsyncOpenSearch')
@@ -205,7 +205,7 @@ class TestOpenSearchClient:
             verify_certs=True,
             connection_class=BufferedAsyncHttpConnection,
             timeout=30,
-            max_response_size=10485760,  # 10MB default
+            max_response_size=None,  # No limit by default
         )
 
     @patch('opensearch.client._initialize_client_single_mode')
@@ -274,7 +274,7 @@ class TestOpenSearchClient:
         assert call_kwargs['use_ssl'] is False  # http:// URL
         assert call_kwargs['verify_certs'] is True
         assert call_kwargs['connection_class'] == BufferedAsyncHttpConnection
-        assert call_kwargs['max_response_size'] == 10485760  # 10MB default
+        assert call_kwargs['max_response_size'] is None  # No limit by default
         # Should not have http_auth when no-auth is True
         assert 'http_auth' not in call_kwargs
 
