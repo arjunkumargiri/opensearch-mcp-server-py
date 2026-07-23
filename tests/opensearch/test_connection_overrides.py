@@ -37,6 +37,8 @@ class TestConnectionOverrides:
             'AWS_OPENSEARCH_SERVERLESS',
             'OPENSEARCH_HEADER_AUTH',
             'OPENSEARCH_MAX_RESPONSE_SIZE',
+            'OPENSEARCH_DYNAMIC_CONNECTION',
+            'OPENSEARCH_ALLOWED_URLS',
         ]
         for key in self._env_keys:
             if key in os.environ:
@@ -60,10 +62,14 @@ class TestConnectionOverrides:
 
     @patch('opensearch.client.AsyncOpenSearch')
     @patch('opensearch.client.get_aws_region_single_mode')
-    def test_url_override_takes_precedence_over_env(self, mock_get_region, mock_opensearch):
+    @patch('opensearch.client.is_dynamic_mode_enabled', return_value=True)
+    def test_url_override_takes_precedence_over_env(
+        self, mock_dynamic, mock_get_region, mock_opensearch
+    ):
         """Tool-level opensearch_url overrides OPENSEARCH_URL env var."""
         os.environ['OPENSEARCH_URL'] = 'https://env-cluster.example.com'
         os.environ['OPENSEARCH_NO_AUTH'] = 'true'
+        os.environ['OPENSEARCH_ALLOWED_URLS'] = 'https://override-cluster.example.com:443'
         mock_get_region.return_value = 'us-east-1'
         mock_opensearch.return_value = Mock()
 
@@ -79,9 +85,11 @@ class TestConnectionOverrides:
 
     @patch('opensearch.client.AsyncOpenSearch')
     @patch('opensearch.client.get_aws_region_single_mode')
-    def test_url_override_without_env_var(self, mock_get_region, mock_opensearch):
-        """Tool-level opensearch_url works even when OPENSEARCH_URL is not set."""
+    @patch('opensearch.client.is_dynamic_mode_enabled', return_value=True)
+    def test_url_override_without_env_var(self, mock_dynamic, mock_get_region, mock_opensearch):
+        """Tool-level opensearch_url works when OPENSEARCH_URL is not set (with allowlist)."""
         # No OPENSEARCH_URL in env
+        os.environ['OPENSEARCH_ALLOWED_URLS'] = 'https://dynamic-cluster.example.com:443'
         mock_get_region.return_value = 'us-east-1'
         mock_opensearch.return_value = Mock()
 
@@ -350,8 +358,10 @@ class TestConnectionOverrides:
 
     @patch('opensearch.client.AsyncOpenSearch')
     @patch('opensearch.client.get_aws_region_single_mode')
-    def test_full_dynamic_connection(self, mock_get_region, mock_opensearch):
+    @patch('opensearch.client.is_dynamic_mode_enabled', return_value=True)
+    def test_full_dynamic_connection(self, mock_dynamic, mock_get_region, mock_opensearch):
         """Agent provides all connection params with no env vars set at all."""
+        os.environ['OPENSEARCH_ALLOWED_URLS'] = 'https://dynamic.example.com:443'
         mock_get_region.return_value = None
         mock_opensearch.return_value = Mock()
 
@@ -371,25 +381,23 @@ class TestConnectionOverrides:
         assert call_kwargs['verify_certs'] is True
         assert call_kwargs['timeout'] == 60
 
-    @patch('opensearch.client.AsyncOpenSearch')
     @patch('opensearch.client.get_aws_region_single_mode')
-    def test_partial_override_mixes_with_env(self, mock_get_region, mock_opensearch):
-        """Override only URL; username/password still come from env."""
+    @patch('opensearch.client.is_dynamic_mode_enabled', return_value=True)
+    def test_dynamic_url_rejected_without_allowlist(
+        self, mock_dynamic, mock_get_region
+    ):
+        """Dynamic URL without allowlist raises ConfigurationError."""
         os.environ['OPENSEARCH_URL'] = 'https://env-cluster.example.com'
         os.environ['OPENSEARCH_USERNAME'] = 'env-user'
         os.environ['OPENSEARCH_PASSWORD'] = 'env-pass'
         mock_get_region.return_value = 'us-east-1'
-        mock_opensearch.return_value = Mock()
 
         args = baseToolArgs(
             opensearch_cluster_name='',
             opensearch_url='https://other-cluster.example.com',
         )
-        initialize_client(args)
-
-        call_kwargs = mock_opensearch.call_args[1]
-        assert 'other-cluster.example.com' in call_kwargs['hosts'][0]
-        assert call_kwargs['http_auth'] == ('env-user', 'env-pass')
+        with pytest.raises(ConfigurationError, match='OPENSEARCH_ALLOWED_URLS'):
+            initialize_client(args)
 
     # --- Error cases ---
 

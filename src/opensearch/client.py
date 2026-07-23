@@ -22,6 +22,7 @@ from http.client import HTTP_PORT, HTTPS_PORT
 from mcp.server.lowlevel.server import request_ctx
 from mcp_server_opensearch.clusters_information import ClusterInfo, get_cluster
 from mcp_server_opensearch.global_state import get_mode, get_profile
+from mcp_server_opensearch.server_instructions import is_dynamic_mode_enabled
 from opensearchpy import AsyncOpenSearch, AWSV4SignerAsyncAuth
 from starlette.requests import Request
 from tools.tool_params import baseToolArgs
@@ -168,6 +169,61 @@ def _parsed_with_default_ports(parsed: ParseResult) -> tuple[str, ParseResult]:
     return urlunparse(new_parsed), new_parsed
 
 
+def _is_url_allowed(url: str) -> bool:
+    """Check whether *url* matches the operator-configured allowlist.
+
+    The allowlist is read from ``OPENSEARCH_ALLOWED_URLS`` — a comma-separated
+    list of URL patterns.  Each pattern is compared against the URL's
+    scheme + hostname + port.  Patterns support:
+    - Exact match:  ``https://cluster.example.com:9200``
+    - Wildcard host: ``https://*.us-east-1.es.amazonaws.com:443``
+
+    Wildcards (``*``) match any sequence of characters within the hostname
+    component only.  Scheme and port must match exactly.
+
+    Returns True if the URL matches at least one pattern, False otherwise.
+    Returns True (allow) when the allowlist is not configured (empty/unset)
+    — the caller must handle the "no allowlist" case separately.
+    """
+    allowlist_raw = os.getenv('OPENSEARCH_ALLOWED_URLS', '').strip()
+    if not allowlist_raw:
+        return False  # No allowlist configured — caller decides policy
+
+    import fnmatch
+
+    try:
+        parsed = urlparse(url)
+        url_host = (parsed.hostname or '').lower()
+        url_port = parsed.port or _DEFAULT_PORTS_BY_SCHEME.get(parsed.scheme, 0)
+        url_scheme = (parsed.scheme or '').lower()
+    except Exception:
+        return False  # Unparseable URL never matches
+
+    for pattern in allowlist_raw.split(','):
+        pattern = pattern.strip()
+        if not pattern:
+            continue
+        try:
+            parsed_pattern = urlparse(pattern)
+            pattern_host = (parsed_pattern.hostname or '').lower()
+            pattern_port = (
+                parsed_pattern.port
+                or _DEFAULT_PORTS_BY_SCHEME.get(parsed_pattern.scheme, 0)
+            )
+            pattern_scheme = (parsed_pattern.scheme or '').lower()
+        except Exception:
+            continue  # Skip malformed patterns
+
+        if url_scheme != pattern_scheme:
+            continue
+        if url_port != pattern_port:
+            continue
+        if fnmatch.fnmatch(url_host, pattern_host):
+            return True
+
+    return False
+
+
 def _log_connection_event(
     auth_method: str,
     datasource_type: str,
@@ -223,99 +279,185 @@ def _initialize_client_single_mode(args: baseToolArgs = None) -> AsyncOpenSearch
         AuthenticationError: If authentication fails
     """
     try:
-        # Get connection parameters from environment variables
-        opensearch_url = os.getenv('OPENSEARCH_URL', '').strip()
-        opensearch_username = os.getenv('OPENSEARCH_USERNAME', '').strip()
-        opensearch_password = os.getenv('OPENSEARCH_PASSWORD', '').strip()
-        opensearch_no_auth = os.getenv('OPENSEARCH_NO_AUTH', '').lower() == 'true'
-        iam_arn = os.getenv('AWS_IAM_ARN', '').strip()
-        # Prefer command line argument, then environment variable
-        profile = get_profile() or os.getenv('AWS_PROFILE', '').strip()
-        is_serverless_mode = os.getenv('AWS_OPENSEARCH_SERVERLESS', '').lower() == 'true'
+        # Start with env-sourced defaults
+        params = {
+            'opensearch_url': os.getenv('OPENSEARCH_URL', '').strip(),
+            'opensearch_username': os.getenv('OPENSEARCH_USERNAME', '').strip(),
+            'opensearch_password': os.getenv('OPENSEARCH_PASSWORD', '').strip(),
+            'opensearch_no_auth': os.getenv('OPENSEARCH_NO_AUTH', '').lower() == 'true',
+            'iam_arn': os.getenv('AWS_IAM_ARN', '').strip(),
+            'profile': get_profile() or os.getenv('AWS_PROFILE', '').strip(),
+            'is_serverless_mode': os.getenv('AWS_OPENSEARCH_SERVERLESS', '').lower() == 'true',
+            'opensearch_timeout': None,
+            'aws_region': get_aws_region_single_mode(),
+            'ssl_verify': os.getenv('OPENSEARCH_SSL_VERIFY', 'true').lower() != 'false',
+            'aws_access_key_id': None,
+            'aws_secret_access_key': None,
+            'aws_session_token': None,
+            'max_response_size': None,
+            'bearer_auth_header': None,
+            'opensearch_ca_cert_path': _get_env_path('OPENSEARCH_CA_CERT_PATH'),
+            'opensearch_client_cert_path': _get_env_path('OPENSEARCH_CLIENT_CERT_PATH'),
+            'opensearch_client_key_path': _get_env_path('OPENSEARCH_CLIENT_KEY_PATH'),
+        }
+
+        # Parse timeout from environment
         opensearch_timeout_str = os.getenv('OPENSEARCH_TIMEOUT', '').strip()
-        opensearch_timeout = int(opensearch_timeout_str) if opensearch_timeout_str else None
-        ssl_verify = os.getenv('OPENSEARCH_SSL_VERIFY', 'true').lower() != 'false'
-        opensearch_ca_cert_path = _get_env_path('OPENSEARCH_CA_CERT_PATH')
-        opensearch_client_cert_path = _get_env_path('OPENSEARCH_CLIENT_CERT_PATH')
-        opensearch_client_key_path = _get_env_path('OPENSEARCH_CLIENT_KEY_PATH')
+        if opensearch_timeout_str:
+            try:
+                params['opensearch_timeout'] = int(opensearch_timeout_str)
+            except ValueError:
+                logger.warning(
+                    f'Invalid OPENSEARCH_TIMEOUT format: {opensearch_timeout_str}, using default'
+                )
 
         # Parse max response size from environment
         max_response_size_str = os.getenv('OPENSEARCH_MAX_RESPONSE_SIZE', '').strip()
-        max_response_size = None
         if max_response_size_str:
             try:
-                max_response_size = int(max_response_size_str)
-                if max_response_size <= 0:
+                value = int(max_response_size_str)
+                if value > 0:
+                    params['max_response_size'] = value
+                else:
                     logger.warning(
-                        f'Invalid OPENSEARCH_MAX_RESPONSE_SIZE value {max_response_size}, using default'
+                        f'Invalid OPENSEARCH_MAX_RESPONSE_SIZE value {value}, using default'
                     )
-                    max_response_size = None
             except ValueError:
                 logger.warning(
                     f'Invalid OPENSEARCH_MAX_RESPONSE_SIZE format: {max_response_size_str}, using default'
                 )
 
-        # Apply per-call overrides from tool args (if provided)
+        # --- Per-call overrides from tool args ---
         if args is not None:
             if args.opensearch_url is not None:
-                opensearch_url = args.opensearch_url.strip()
-            if args.opensearch_username is not None:
-                opensearch_username = args.opensearch_username.strip()
-            if args.opensearch_password is not None:
-                # Intentionally not stripped: leading/trailing whitespace in
-                # passwords is valid and must be preserved exactly as provided.
-                opensearch_password = args.opensearch_password
-            if args.opensearch_no_auth is not None:
-                opensearch_no_auth = args.opensearch_no_auth
-            if args.aws_iam_arn is not None:
-                iam_arn = args.aws_iam_arn.strip()
-            if args.aws_profile is not None:
-                profile = args.aws_profile.strip()
-            if args.aws_opensearch_serverless is not None:
-                is_serverless_mode = args.aws_opensearch_serverless
-            if args.opensearch_timeout is not None:
-                opensearch_timeout = args.opensearch_timeout
-            if args.opensearch_ssl_verify is not None:
-                ssl_verify = args.opensearch_ssl_verify
+                # Reject URL override when dynamic mode is disabled.
+                if not is_dynamic_mode_enabled():
+                    raise ConfigurationError(
+                        'Dynamic connection override is disabled. The opensearch_url parameter '
+                        'cannot be used when OPENSEARCH_DYNAMIC_CONNECTION is not enabled. '
+                        'Set OPENSEARCH_DYNAMIC_CONNECTION=true to allow per-call URL overrides.'
+                    )
 
-        aws_access_key_id = None
-        aws_secret_access_key = None
-        aws_session_token = None
-        bearer_auth_header = None
+                override_url = args.opensearch_url.strip()
+                has_allowlist = bool(os.getenv('OPENSEARCH_ALLOWED_URLS', '').strip())
 
-        # Default to region from environment, then apply override
-        aws_region = get_aws_region_single_mode()
-        if args is not None and args.aws_region is not None:
-            aws_region = args.aws_region.strip()
+                if has_allowlist:
+                    # Allowlist configured: validate URL, then use env credentials
+                    # (operator explicitly trusts these hosts).
+                    if not _is_url_allowed(override_url):
+                        raise ConfigurationError(
+                            f'Dynamic opensearch_url is not in the allowed URLs list. '
+                            f'URL: {override_url}. Configure OPENSEARCH_ALLOWED_URLS to '
+                            f'permit this endpoint.'
+                        )
+                    # URL is trusted — apply override on top of env params
+                    params['opensearch_url'] = override_url
+                    # Apply any other per-call overrides
+                    if args.opensearch_username is not None:
+                        params['opensearch_username'] = args.opensearch_username.strip()
+                    if args.opensearch_password is not None:
+                        params['opensearch_password'] = args.opensearch_password
+                    if args.opensearch_no_auth is not None:
+                        params['opensearch_no_auth'] = args.opensearch_no_auth
+                    if args.aws_iam_arn is not None:
+                        params['iam_arn'] = args.aws_iam_arn.strip()
+                    if args.aws_profile is not None:
+                        params['profile'] = args.aws_profile.strip()
+                    if args.aws_opensearch_serverless is not None:
+                        params['is_serverless_mode'] = args.aws_opensearch_serverless
+                    if args.opensearch_timeout is not None:
+                        params['opensearch_timeout'] = args.opensearch_timeout
+                    if args.opensearch_ssl_verify is not None:
+                        params['ssl_verify'] = args.opensearch_ssl_verify
+                    if args.aws_region is not None:
+                        params['aws_region'] = args.aws_region.strip()
+                else:
+                    # No allowlist configured — reject dynamic URL to prevent
+                    # credential leakage to untrusted hosts.
+                    raise ConfigurationError(
+                        'Dynamic opensearch_url requires OPENSEARCH_ALLOWED_URLS to be '
+                        'configured. Set OPENSEARCH_ALLOWED_URLS to a comma-separated list '
+                        'of trusted URL patterns (supports wildcards, e.g. '
+                        'https://*.us-east-1.es.amazonaws.com:443).'
+                    )
+            else:
+                # No URL override — apply non-URL per-call overrides on top of env
+                if args.opensearch_username is not None:
+                    params['opensearch_username'] = args.opensearch_username.strip()
+                if args.opensearch_password is not None:
+                    params['opensearch_password'] = args.opensearch_password
+                if args.opensearch_no_auth is not None:
+                    params['opensearch_no_auth'] = args.opensearch_no_auth
+                if args.aws_iam_arn is not None:
+                    params['iam_arn'] = args.aws_iam_arn.strip()
+                if args.aws_profile is not None:
+                    params['profile'] = args.aws_profile.strip()
+                if args.aws_opensearch_serverless is not None:
+                    params['is_serverless_mode'] = args.aws_opensearch_serverless
+                if args.opensearch_timeout is not None:
+                    params['opensearch_timeout'] = args.opensearch_timeout
+                if args.opensearch_ssl_verify is not None:
+                    params['ssl_verify'] = args.opensearch_ssl_verify
+                if args.aws_region is not None:
+                    params['aws_region'] = args.aws_region.strip()
 
-        # Check if header auth is enabled and update variables accordingly
+        # --- Header-auth overrides ---
         use_header_auth = os.getenv('OPENSEARCH_HEADER_AUTH', '').lower() == 'true'
         if use_header_auth:
             header_auth = _get_auth_from_headers()
             header_url = header_auth.get('opensearch_url')
             if header_url:
-                opensearch_url = header_url
-            header_service = header_auth.get('aws_service_name')
-            if header_service:
-                is_serverless_mode = header_service.lower() == OPENSEARCH_SERVERLESS_SERVICE
-            aws_access_key_id = header_auth.get('aws_access_key_id')
-            aws_secret_access_key = header_auth.get('aws_secret_access_key')
-            aws_session_token = header_auth.get('aws_session_token')
-            # Override region if provided in headers
-            header_region = header_auth.get('aws_region')
-            if header_region:
-                aws_region = header_region
-            # Override Basic auth credentials if provided in headers
-            header_username = header_auth.get('opensearch_username')
-            header_password = header_auth.get('opensearch_password')
-            if header_username and header_password:
-                opensearch_username = header_username
-                opensearch_password = header_password
-            # Pass through Bearer token if provided in headers
-            bearer_auth_header = header_auth.get('bearer_auth_header')
+                # Credential isolation: reset params to header-provided values only.
+                logger.info(
+                    'Header opensearch_url provided; building client from '
+                    'header args only (credential isolation).'
+                )
+                header_service = header_auth.get('aws_service_name', '')
+                params = {
+                    'opensearch_url': header_url,
+                    'opensearch_username': header_auth.get('opensearch_username', ''),
+                    'opensearch_password': header_auth.get('opensearch_password', ''),
+                    'opensearch_no_auth': False,
+                    'iam_arn': '',
+                    'profile': '',
+                    'is_serverless_mode': (
+                        header_service.lower() == OPENSEARCH_SERVERLESS_SERVICE
+                        if header_service else False
+                    ),
+                    'opensearch_timeout': params['opensearch_timeout'],
+                    'aws_region': header_auth.get('aws_region', ''),
+                    'ssl_verify': params['ssl_verify'],
+                    'aws_access_key_id': header_auth.get('aws_access_key_id'),
+                    'aws_secret_access_key': header_auth.get('aws_secret_access_key'),
+                    'aws_session_token': header_auth.get('aws_session_token'),
+                    'max_response_size': params['max_response_size'],
+                    'bearer_auth_header': header_auth.get('bearer_auth_header'),
+                    'opensearch_ca_cert_path': None,
+                    'opensearch_client_cert_path': None,
+                    'opensearch_client_key_path': None,
+                }
+            else:
+                # No URL in headers — apply header overrides on top of current params
+                header_service = header_auth.get('aws_service_name')
+                if header_service:
+                    params['is_serverless_mode'] = (
+                        header_service.lower() == OPENSEARCH_SERVERLESS_SERVICE
+                    )
+                params['aws_access_key_id'] = header_auth.get('aws_access_key_id')
+                params['aws_secret_access_key'] = header_auth.get('aws_secret_access_key')
+                params['aws_session_token'] = header_auth.get('aws_session_token')
+                header_region = header_auth.get('aws_region')
+                if header_region:
+                    params['aws_region'] = header_region
+                header_username = header_auth.get('opensearch_username')
+                header_password = header_auth.get('opensearch_password')
+                if header_username and header_password:
+                    params['opensearch_username'] = header_username
+                    params['opensearch_password'] = header_password
+                params['bearer_auth_header'] = header_auth.get('bearer_auth_header')
 
-        # Validate URL after potential header override (must come from either env or headers)
-        if not opensearch_url or not opensearch_url.strip():
+        # Validate URL
+        if not params['opensearch_url'] or not params['opensearch_url'].strip():
             if use_header_auth:
                 raise ConfigurationError(
                     'OPENSEARCH_URL is required. Please provide it either in request headers (opensearch-url) '
@@ -326,29 +468,11 @@ def _initialize_client_single_mode(args: baseToolArgs = None) -> AsyncOpenSearch
                     'OPENSEARCH_URL environment variable is required but not set'
                 )
 
-        logger.info(f'Initializing single mode OpenSearch client for URL: {opensearch_url}')
-
-        # Use common client creation function
-        return _create_opensearch_client(
-            opensearch_url=opensearch_url,
-            opensearch_username=opensearch_username,
-            opensearch_password=opensearch_password,
-            opensearch_no_auth=opensearch_no_auth,
-            iam_arn=iam_arn,
-            profile=profile,
-            is_serverless_mode=is_serverless_mode,
-            opensearch_timeout=opensearch_timeout,
-            aws_region=aws_region,
-            ssl_verify=ssl_verify,
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token,
-            max_response_size=max_response_size,
-            bearer_auth_header=bearer_auth_header,
-            opensearch_ca_cert_path=opensearch_ca_cert_path,
-            opensearch_client_cert_path=opensearch_client_cert_path,
-            opensearch_client_key_path=opensearch_client_key_path,
+        logger.info(
+            f'Initializing single mode OpenSearch client for URL: {params["opensearch_url"]}'
         )
+
+        return _create_opensearch_client(**params)
 
     except (ConfigurationError, AuthenticationError):
         raise
